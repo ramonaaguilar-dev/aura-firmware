@@ -1,15 +1,21 @@
-// Configuración de conexión MQTT por WebSockets al broker público HiveMQ
+// Configuración WebSockets MQTT
 const broker = "broker.hivemq.com";
-const port = 8000; // Puerto WebSockets
-const clientId = "aura_web_dashboard_" + Math.random().toString(16).substr(2, 8);
+const port = 8000;
+const clientId = "aura_web_inventory_" + Math.random().toString(16).substr(2, 8);
 
 const deviceId = "e1-pb-leca-her01";
 const topicData = `devices/${deviceId}/data`;
 const topicStatus = `devices/${deviceId}/status`;
 
-let totalStock = 0;
+// Base de Datos de Componentes Iniciales (Catálogo del LabECA)
+const inventarioBase = {
+    "E200001A8812014": { nombre: "Osciloscopio Digital Rigol", categoria: "Equipamiento", enLab: true, fecha: "Inicial" },
+    "E200001A8812015": { nombre: "Estación de Soldadura Hakko", categoria: "Herramientas", enLab: true, fecha: "Inicial" },
+    "E200001A8812016": { nombre: "Multímetro Digital Fluke", categoria: "Medición", enLab: true, fecha: "Inicial" },
+    "E200001A8812017": { nombre: "Fuente Regulada DC 30V", categoria: "Equipamiento", enLab: false, fecha: "Inicial (Prestado)" },
+    "E200001A8812018": { nombre: "Set de Destornilladores de Precisión", categoria: "Herramientas", enLab: true, fecha: "Inicial" }
+};
 
-// Inicialización del cliente MQTT Websockets
 const client = new Paho.MQTT.Client(broker, port, clientId);
 
 client.onConnectionLost = onConnectionLost;
@@ -22,85 +28,121 @@ client.connect({
 });
 
 function onConnect() {
-    console.log("Conectado exitosamente por WebSockets al Broker MQTT");
+    console.log("Conectado a MQTT vía WebSockets");
     document.getElementById("mqtt-status").innerText = "Online (WebSockets)";
     document.getElementById("mqtt-status").className = "badge bg-success";
 
-    // Suscribirse a los tópicos de Datos y Estado del dispositivo
     client.subscribe(topicData);
     client.subscribe(topicStatus);
+
+    renderizarInventario();
 }
 
 function onFailure(response) {
-    console.error("Fallo la conexión MQTT:", response.errorMessage);
     document.getElementById("mqtt-status").innerText = "Error de Conexión";
     document.getElementById("mqtt-status").className = "badge bg-danger";
 }
 
 function onConnectionLost(responseObject) {
     if (responseObject.errorCode !== 0) {
-        console.warn("Conexión perdida:", responseObject.errorMessage);
         document.getElementById("mqtt-status").innerText = "Desconectado";
         document.getElementById("mqtt-status").className = "badge bg-danger";
     }
 }
 
-// Procesamiento de mensajes entrantes
+// Renderizar la tabla principal de inventario y actualizar contadores
+function renderizarInventario() {
+    const tbody = document.getElementById("inventory-table-body");
+    tbody.innerHTML = "";
+
+    let total = 0;
+    let disponibles = 0;
+    let prestados = 0;
+
+    for (const [uid, item] of Object.entries(inventarioBase)) {
+        total++;
+        if (item.enLab) disponibles++;
+        else prestados++;
+
+        const tr = document.createElement("tr");
+        const estadoBadge = item.enLab 
+            ? '<span class="badge bg-success">DISPONIBLE (En Lab)</span>' 
+            : '<span class="badge bg-warning text-dark">PRESTADO / RETIRADO</span>';
+        
+        const ubicacionTexto = item.enLab ? "LabECA - Estante A" : "Fuera de Laboratorio";
+
+        tr.innerHTML = `
+            <td><code>${uid}</code></td>
+            <td class="fw-bold">${item.nombre}</td>
+            <td><span class="badge bg-secondary">${item.categoria}</span></td>
+            <td>${estadoBadge}</td>
+            <td>${ubicacionTexto}</td>
+            <td><small class="text-muted">${item.fecha}</small></td>
+        `;
+        tbody.appendChild(tr);
+    }
+
+    // Actualizar métricas generales
+    document.getElementById("total-inventario").innerText = total;
+    document.getElementById("stock-disponible").innerText = disponibles;
+    document.getElementById("componentes-prestados").innerText = prestados;
+}
+
+// Manejo de eventos MQTT entrantes
 function onMessageArrived(message) {
     try {
         const payload = JSON.parse(message.payloadString);
         
         if (message.destinationName === topicData) {
-            procesarEventoDatos(payload);
+            procesarEventoMovimiento(payload);
         } else if (message.destinationName === topicStatus) {
             procesarEventoEstado(payload);
         }
     } catch (e) {
-        console.error("Error al procesar el mensaje JSON:", e);
+        console.error("Error procesando mensaje MQTT:", e);
     }
 }
 
-function procesarEventoDatos(payload) {
+function procesarEventoMovimiento(payload) {
     const values = payload.values;
     if (!values) return;
 
-    const tagUid = values.tag_uid || "Desconocido";
+    const tagUid = values.tag_uid || "E200001A8812014";
     const direccion = values.direccion; // 1 = Entrada, 2 = Salida
-    const timestamp = new Date().toLocaleTimeString();
+    const hora = new Date().toLocaleTimeString();
 
-    let textoMovimiento = "";
-    let badgeClass = "";
-
-    if (direccion === 1) {
-        textoMovimiento = "ENTRADA (Ingreso a LabECA)";
-        badgeClass = "bg-success";
-        totalStock++;
-    } else if (direccion === 2) {
-        textoMovimiento = "SALIDA (Retiro de LabECA)";
-        badgeClass = "bg-warning text-dark";
-        totalStock = Math.max(0, totalStock - 1);
+    // Actualizar o dar de alta en la base local
+    if (!inventarioBase[tagUid]) {
+        inventarioBase[tagUid] = {
+            nombre: `Activo Nuevo (${tagUid.slice(-4)})`,
+            categoria: "General",
+            enLab: direccion === 1,
+            fecha: hora
+        };
     } else {
-        textoMovimiento = "Lectura / Detección";
-        badgeClass = "bg-info";
+        inventarioBase[tagUid].enLab = (direccion === 1);
+        inventarioBase[tagUid].fecha = hora;
     }
 
-    // Actualizar métricas
-    document.getElementById("total-stock").innerText = totalStock;
-    document.getElementById("last-event-type").innerText = direccion === 1 ? "Entrada" : "Salida";
-    document.getElementById("last-event-uid").innerText = `Tag: ${tagUid}`;
+    // Re-renderizar tabla de stock con el nuevo estado
+    renderizarInventario();
 
-    // Agregar fila a la tabla
+    // Agregar registro al historial
     const emptyRow = document.getElementById("empty-row");
     if (emptyRow) emptyRow.remove();
 
     const tbody = document.getElementById("movements-table-body");
     const row = document.createElement("tr");
 
+    const badgeMov = direccion === 1 
+        ? '<span class="badge bg-success">ENTRADA (Ingresó a Lab)</span>'
+        : '<span class="badge bg-warning text-dark">SALIDA (Retirado de Lab)</span>';
+
     row.innerHTML = `
-        <td>${timestamp}</td>
+        <td>${hora}</td>
         <td><code>${tagUid}</code></td>
-        <td><span class="badge ${badgeClass}">${textoMovimiento}</span></td>
-        <td>E1-PB-LECA</td>
+        <td>${inventarioBase[tagUid].nombre}</td>
+        <td>${badgeMov}</td>
     `;
 
     tbody.insertBefore(row, tbody.firstChild);
@@ -114,11 +156,11 @@ function procesarEventoEstado(payload) {
     document.getElementById("node-heap").innerText = `Heap Libre: ${freeHeap}`;
 }
 
-function limpiarTabla() {
+function limpiarHistorial() {
     const tbody = document.getElementById("movements-table-body");
     tbody.innerHTML = `
         <tr id="empty-row">
-            <td colspan="4" class="text-center text-muted py-4">Esperando eventos del lector...</td>
+            <td colspan="4" class="text-center text-muted py-3">Esperando eventos del lector...</td>
         </tr>
     `;
 }

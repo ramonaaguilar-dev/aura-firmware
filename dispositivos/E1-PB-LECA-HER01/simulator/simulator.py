@@ -1,5 +1,6 @@
 import json
 import time
+import random
 import paho.mqtt.client as mqtt
 
 DEVICE_ID = "e1-pb-leca-her01"
@@ -9,49 +10,69 @@ PORT = 1883
 TOPIC_DATA = f"devices/{DEVICE_ID}/data"
 TOPIC_STATUS = f"devices/{DEVICE_ID}/status"
 
-client = mqtt.Client()
+# Lista de Tags RFID asociados a las herramientas del LabECA
+HERRAMIENTAS_TAGS = [
+    "E200001A8812014",  # Osciloscopio Digital Rigol
+    "E200001A8812015",  # Estación de Soldadura Hakko
+    "E200001A8812016",  # Multímetro Digital Fluke
+    "E200001A8812017",  # Fuente Regulada DC 30V
+    "E200001A8812018"   # Set de Destornilladores
+]
+
+try:
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+except Attribute:
+    client = mqtt.Client()
 
 def on_connect(client, userdata, flags, rc):
-    print(f"Conectado al Broker MQTT con código de resultado: {rc}")
+    if rc == 0:
+        print("✅ Conectado al Broker MQTT público (HiveMQ)")
+    else:
+        print(f"❌ Error de conexión al Broker: {rc}")
 
 client.on_connect = on_connect
+
+print(f"--- Simulador Avanzado AURA iniciado para {DEVICE_ID} ---")
+print("Simulando Entradas (1) y Salidas/Préstamos (2) en tiempo real...")
 
 try:
     client.connect(BROKER, PORT, 60)
     client.loop_start()
-except Exception as e:
-    print(f"Error de conexión al broker: {e}")
+    time.sleep(1)
 
-print(f"--- Simulador AURA iniciado para {DEVICE_ID} ---")
-
-try:
     while True:
-        # 1. Simulación de lectura de un Tag UHF al ingresar al LabECA
+        # Elegir una herramienta al azar
+        tag_seleccionado = random.choice(HERRAMIENTAS_TAGS)
+        
+        # Simular movimiento: 1 = ENTRADA, 2 = SALIDA / PRÉSTAMO
+        direccion_simulada = random.choice([1, 2])
+        tipo_mov = "ENTRADA" if direccion_simulada == 1 else "SALIDA / PRÉSTAMO"
+
         payload_data = {
             "values": {
-                "tag_uid": "E200001A8812014",
-                "direccion": 1 # 1 = ENTRADA, 2 = SALIDA
+                "tag_uid": tag_seleccionado,
+                "direccion": direccion_simulada
             }
         }
+        
         client.publish(TOPIC_DATA, json.dumps(payload_data))
-        print(f"[DATA Sent] -> {TOPIC_DATA}: {payload_data}")
+        print(f"\n[EVENTO REGISTRADO] -> Movimiento: {tipo_mov} | Tag: {tag_seleccionado}")
 
-        time.sleep(2)
+        time.sleep(4)
 
-        # 2. Simulación de reporte periódico de salud/estado del nodo
+        # Reporte de estado periódico del dispositivo
         payload_status = {
             "status": "online",
             "uhf_reader_ok": True,
             "barrera_a_ok": True,
             "barrera_b_ok": True,
-            "free_heap": 182400
+            "free_heap": random.randint(180000, 185000)
         }
         client.publish(TOPIC_STATUS, json.dumps(payload_status))
-        print(f"[STATUS Sent] -> {TOPIC_STATUS}: {payload_status}")
 
-        time.sleep(8)
+        time.sleep(6)
 
 except KeyboardInterrupt:
-    print("\nSimulador detenido.")
+    print("\n🛑 Simulador detenido por el usuario.")
     client.loop_stop()
     client.disconnect()
