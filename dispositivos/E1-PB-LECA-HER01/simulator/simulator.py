@@ -3,7 +3,7 @@ import time
 import paho.mqtt.client as mqtt
 
 DEVICE_ID = "e1-pb-leca-her01"
-BROKER = "localhost" # O la IP del broker AURA de pruebas
+BROKER = "broker.hivemq.com"
 PORT = 1883
 
 TOPIC_DATA = f"devices/{DEVICE_ID}/data"
