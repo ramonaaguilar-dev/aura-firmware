@@ -82,13 +82,39 @@ function renderizarInventario() {
         tbody.appendChild(tr);
     }
 
-    // Actualizar métricas generales
     document.getElementById("total-inventario").innerText = total;
     document.getElementById("stock-disponible").innerText = disponibles;
     document.getElementById("componentes-prestados").innerText = prestados;
 }
 
-// Manejo de eventos MQTT entrantes
+// Función para guardar un nuevo activo desde la interfaz web
+function guardarNuevoActivo(event) {
+    event.preventDefault();
+
+    const uid = document.getElementById("tag-uid-input").value.trim().toUpperCase();
+    const nombre = document.getElementById("tag-nombre-input").value.trim();
+    const categoria = document.getElementById("tag-categoria-input").value;
+    const hora = new Date().toLocaleTimeString();
+
+    if (!uid || !nombre) return;
+
+    // Registrar en el catálogo
+    inventarioBase[uid] = {
+        nombre: nombre,
+        categoria: categoria,
+        enLab: true, // Se asume que ingresa disponible
+        fecha: `${hora} (Nuevo Registro)`
+    };
+
+    renderizarInventario();
+
+    // Limpiar y cerrar modal
+    document.getElementById("form-nuevo-activo").reset();
+    const modalElement = document.getElementById("modalAltaTag");
+    const modal = bootstrap.Modal.getInstance(modalElement);
+    modal.hide();
+}
+
 function onMessageArrived(message) {
     try {
         const payload = JSON.parse(message.payloadString);
@@ -111,11 +137,10 @@ function procesarEventoMovimiento(payload) {
     const direccion = values.direccion; // 1 = Entrada, 2 = Salida
     const hora = new Date().toLocaleTimeString();
 
-    // Actualizar o dar de alta en la base local
     if (!inventarioBase[tagUid]) {
         inventarioBase[tagUid] = {
-            nombre: `Activo Nuevo (${tagUid.slice(-4)})`,
-            categoria: "General",
+            nombre: `Activo Sin Registrar (${tagUid.slice(-4)})`,
+            categoria: "Sin Asignar",
             enLab: direccion === 1,
             fecha: hora
         };
@@ -124,10 +149,8 @@ function procesarEventoMovimiento(payload) {
         inventarioBase[tagUid].fecha = hora;
     }
 
-    // Re-renderizar tabla de stock con el nuevo estado
     renderizarInventario();
 
-    // Agregar registro al historial
     const emptyRow = document.getElementById("empty-row");
     if (emptyRow) emptyRow.remove();
 
